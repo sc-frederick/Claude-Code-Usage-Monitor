@@ -611,6 +611,8 @@ struct StudioApp {
     asset_page_selected: Option<String>,
     asset_error: Option<String>,
     settings_error: Option<String>,
+    /// Result of the last attempt to list CLIProxyAPI hub accounts.
+    cliproxy_status: Option<Result<String, String>>,
     theme_error: Option<String>,
     pending_unsaved_action: Option<PendingUnsavedAction>,
     asset_delete_confirmation: Option<AssetDeletionConfirmation>,

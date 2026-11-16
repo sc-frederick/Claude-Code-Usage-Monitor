@@ -55,6 +55,11 @@ pub struct AccountProfile {
     pub config_dir: String,
     pub credentials_path: String,
     pub enabled: bool,
+    /// Auth file name of an account pooled by the CLIProxyAPI hub in
+    /// [`AccountSettings::cliproxy`]. When set, usage comes from the hub and
+    /// the local config directory and credentials file are ignored.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cliproxy_auth: String,
 }
 
 impl Default for AccountProfile {
@@ -65,6 +70,7 @@ impl Default for AccountProfile {
             config_dir: String::new(),
             credentials_path: String::new(),
             enabled: true,
+            cliproxy_auth: String::new(),
         }
     }
 }
@@ -105,6 +111,29 @@ impl ProviderAccounts {
             enabled: false,
             ..Default::default()
         });
+    }
+
+    /// Add a monitored profile for a hub account unless one already tracks it.
+    /// Returns whether a profile was added.
+    pub fn add_cliproxy(&mut self, auth: &str, name: &str) -> bool {
+        if self
+            .profiles
+            .iter()
+            .any(|profile| profile.cliproxy_auth == auth)
+        {
+            return false;
+        }
+        self.normalize();
+        let (id, _) = self.allocate_id();
+        self.profiles.push(AccountProfile {
+            id,
+            name: name.to_string(),
+            enabled: true,
+            cliproxy_auth: auth.to_string(),
+            ..Default::default()
+        });
+        self.normalize();
+        true
     }
 
     fn allocate_id(&mut self) -> (String, usize) {
@@ -169,6 +198,44 @@ impl ProviderAccounts {
 pub struct AccountSettings {
     pub claude: ProviderAccounts,
     pub codex: ProviderAccounts,
+    /// The default profile reads the Grok CLI login; others come from the hub.
+    pub grok: ProviderAccounts,
+    /// A CLIProxyAPI hub whose pooled accounts profiles can monitor.
+    pub cliproxy: CliProxySettings,
+}
+
+/// Where to reach a CLIProxyAPI management API. Settings hold the location
+/// of the management key, never the key itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CliProxySettings {
+    /// Server origin, such as `https://hub.example.ts.net:8318`. A trailing
+    /// `/v0/management` is accepted.
+    pub url: String,
+    /// Windows Credential Manager generic credential holding the key.
+    pub key_credential: String,
+    /// File holding only the key; used when `key_credential` is empty.
+    pub key_file: String,
+}
+
+impl CliProxySettings {
+    pub fn is_configured(&self) -> bool {
+        let has_key = !self.key_credential.trim().is_empty() || !self.key_file.trim().is_empty();
+        !self.url.trim().is_empty() && has_key
+    }
+
+    /// Base URL of the management API, without a trailing slash.
+    pub fn management_base(&self) -> Option<String> {
+        let url = self.url.trim().trim_end_matches('/');
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return None;
+        }
+        let url = url
+            .strip_suffix("/v0/management")
+            .or_else(|| url.strip_suffix("/v8/management"))
+            .unwrap_or(url);
+        Some(format!("{url}/v0/management"))
+    }
 }
 
 impl AccountSettings {
@@ -176,8 +243,24 @@ impl AccountSettings {
         match provider {
             ProviderId::Claude => Some(&self.claude),
             ProviderId::Codex => Some(&self.codex),
+            ProviderId::Grok => Some(&self.grok),
             _ => None,
         }
+    }
+
+    pub fn get_mut(&mut self, provider: ProviderId) -> Option<&mut ProviderAccounts> {
+        match provider {
+            ProviderId::Claude => Some(&mut self.claude),
+            ProviderId::Codex => Some(&mut self.codex),
+            ProviderId::Grok => Some(&mut self.grok),
+            _ => None,
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        self.claude.normalize();
+        self.codex.normalize();
+        self.grok.normalize();
     }
 }
 
@@ -218,9 +301,20 @@ impl AccountProfile {
         self.id == other.id
             && self.config_dir == other.config_dir
             && self.credentials_path == other.credentials_path
+            && self.cliproxy_auth == other.cliproxy_auth
+    }
+
+    pub fn uses_cliproxy(&self) -> bool {
+        !self.cliproxy_auth.trim().is_empty()
     }
 
     pub fn credential_path(&self, provider: ProviderId) -> Result<Option<PathBuf>, String> {
+        if self.uses_cliproxy() {
+            return Ok(None);
+        }
+        if provider == ProviderId::Grok && self.id != "default" {
+            return Err("Additional Grok accounts must come from a CLIProxyAPI hub".into());
+        }
         if !self.credentials_path.trim().is_empty() {
             return expand_path(Path::new(self.credentials_path.trim()))
                 .map(Some)

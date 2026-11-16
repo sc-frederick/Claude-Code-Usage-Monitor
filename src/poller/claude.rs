@@ -16,7 +16,7 @@ use crate::models::{CreditsSection, UsageData};
 mod cli;
 mod limits;
 
-const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+pub(super) const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 // Keep header probes on the low-cost Haiku tier. This API alias follows 4.5
 // snapshots, but still needs updating when the Haiku 4.5 generation retires.
@@ -267,6 +267,15 @@ fn parse_usage_body(body: &mut ureq::Body) -> Result<UsageData, PollError> {
             return Err(PollError::UnexpectedResponse);
         }
     };
+    validated_usage_from_response(response)
+}
+
+/// Parse a usage endpoint body fetched by someone else, such as a hub.
+pub(super) fn usage_from_json(body: &str) -> Result<UsageData, PollError> {
+    let response: UsageResponse = serde_json::from_str(body).map_err(|error| {
+        diagnose::log_error("unexpected Claude usage response", error);
+        PollError::UnexpectedResponse
+    })?;
     validated_usage_from_response(response)
 }
 

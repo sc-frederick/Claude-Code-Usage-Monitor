@@ -79,12 +79,8 @@ impl StudioApp {
                             }
                         },
                     );
-                    if matches!(descriptor.id, ProviderId::Claude | ProviderId::Codex) {
-                        let enabled = self.settings.provider_enabled(descriptor.id);
-                        let accounts = match descriptor.id {
-                            ProviderId::Claude => &mut self.settings.accounts.claude,
-                            _ => &mut self.settings.accounts.codex,
-                        };
+                    let enabled = self.settings.provider_enabled(descriptor.id);
+                    if let Some(accounts) = self.settings.accounts.get_mut(descriptor.id) {
                         ui.push_id(descriptor.key, |ui| {
                             changed |= account_settings(
                                 ui,
@@ -98,6 +94,9 @@ impl StudioApp {
                         });
                     }
                 }
+            });
+            section(ui, language.text("CLIProxyAPI hub"), |ui| {
+                changed |= self.cliproxy_settings(ui, language);
             });
             section(ui, language.text("Display"), |ui| {
                 setting_row(
@@ -198,8 +197,7 @@ impl StudioApp {
             });
         });
         if changed {
-            self.settings.accounts.claude.normalize();
-            self.settings.accounts.codex.normalize();
+            self.settings.accounts.normalize();
             if let Some(data) = self.usage.as_mut() {
                 data.select_accounts(&self.settings.accounts);
             }
@@ -217,6 +215,90 @@ impl StudioApp {
             self.page = Page::Studio;
         }
     }
+}
+
+impl StudioApp {
+    /// Hub location and key, plus a button that adds a profile for every
+    /// supported hub account that no profile tracks yet.
+    fn cliproxy_settings(&mut self, ui: &mut egui::Ui, language: LanguageId) -> bool {
+        let mut changed = false;
+        ui.label(language.text("Monitor accounts pooled by a CLIProxyAPI server. Usage is read through its management API with each account's own login."));
+        let hub = &mut self.settings.accounts.cliproxy;
+        ui.label(language.text("Server URL"));
+        changed |= ui
+            .add(
+                crate::ui::components::text_field::singleline(&mut hub.url)
+                    .hint_text("https://hub.example.ts.net:8318"),
+            )
+            .lost_focus();
+        ui.label(
+            language
+                .text("Management key in Windows Credential Manager (generic credential target)"),
+        );
+        changed |= ui
+            .add(
+                crate::ui::components::text_field::singleline(&mut hub.key_credential)
+                    .hint_text("ClaudeCodeUsageMonitor/cliproxyapi"),
+            )
+            .lost_focus();
+        ui.collapsing(language.text("Key file"), |ui| {
+            changed |= ui
+                .add(
+                    crate::ui::components::text_field::singleline(&mut hub.key_file)
+                        .hint_text(language.text("Used when no credential target is set")),
+                )
+                .lost_focus();
+        });
+        let configured = hub.is_configured();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    configured,
+                    egui::Button::new(language.text("Add hub accounts")),
+                )
+                .clicked()
+            {
+                self.cliproxy_status =
+                    Some(add_hub_accounts(&mut self.settings.accounts, language));
+                changed = true;
+            }
+            match &self.cliproxy_status {
+                Some(Ok(message)) => {
+                    ui.weak(message);
+                }
+                Some(Err(message)) => {
+                    ui.colored_label(egui::Color32::from_rgb(196, 64, 64), message);
+                }
+                None => {}
+            }
+        });
+        changed
+    }
+}
+
+fn add_hub_accounts(
+    accounts: &mut crate::accounts::AccountSettings,
+    language: LanguageId,
+) -> Result<String, String> {
+    let hub_accounts = crate::poller::cliproxy::list_accounts(&accounts.cliproxy)
+        .map_err(|error| error.message(language))?;
+    let mut added = 0;
+    let mut found = 0;
+    for account in hub_accounts.iter().filter(|account| !account.disabled) {
+        let Some(provider) = account.provider else {
+            continue;
+        };
+        let Some(profiles) = accounts.get_mut(provider) else {
+            continue;
+        };
+        found += 1;
+        added += profiles.add_cliproxy(&account.auth, &account.label) as usize;
+    }
+    Ok(format!(
+        "{found} {}, {added} {}",
+        language.text("supported accounts"),
+        language.text("added")
+    ))
 }
 
 fn account_settings(
@@ -257,6 +339,12 @@ fn account_settings(
                     changed |= name.lost_focus();
                     if ui.button(language.text("Remove")).clicked() { remove = Some(index); }
                 });
+                if profile.uses_cliproxy() {
+                    ui.weak(format!("{}: {}", language.text("CLIProxyAPI hub account"), profile.cliproxy_auth));
+                    ui.weak(format!("{}: accounts.{}.{}", language.text("Theme binding"), provider.descriptor().key, profile.id));
+                } else if provider == ProviderId::Grok {
+                    ui.weak(language.text("Uses the Grok CLI login. Add other Grok accounts from a CLIProxyAPI hub."));
+                } else {
                 ui.label(language.text("Config directory"));
                 let directory = ui.add(crate::ui::components::text_field::singleline(&mut profile.config_dir)
                     .hint_text(if provider == ProviderId::Claude { "~/.claude-work" } else { "~/.codex-work" }));
@@ -281,6 +369,7 @@ fn account_settings(
                         language.text("Uses CODEX_HOME when set; otherwise ~/.codex/auth.json.")
                     }); }
                     Ok(Some(path)) => { ui.weak(path.display().to_string()); }
+                }
                 }
                 if !provider_enabled || !profile.enabled {
                     ui.weak(language.text("Monitoring disabled"));

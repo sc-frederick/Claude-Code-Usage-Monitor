@@ -9,6 +9,7 @@ The instructions below use the app's English labels.
 - [Open the dashboard](#open-the-dashboard)
 - [Duplicate and customise a built-in theme](#duplicate-and-customise-a-built-in-theme)
 - [Choose providers and refresh usage](#choose-providers-and-refresh-usage)
+- [Monitor accounts pooled by a CLIProxyAPI hub](#monitor-accounts-pooled-by-a-cliproxyapi-hub)
 - [Show used or remaining allowance](#show-used-or-remaining-allowance)
 - [Windows VM testing for developers](#windows-vm-testing-for-developers)
 
@@ -91,6 +92,33 @@ Custom theme files are stored in:
 
 These settings save automatically. The default theme adapts to enabled providers;
 a custom theme must include layers for the providers you want to display.
+
+## Monitor accounts pooled by a CLIProxyAPI hub
+
+If your Claude, Codex or Grok logins live on a
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) server, the monitor
+can show each pooled account's usage instead of this machine's own login. It
+lists the accounts with the management API (`auth-files`) and reads each
+provider's usage endpoint through `api-call`, which uses the account's login
+stored on the server.
+
+1. Store the server's management key as a generic credential in Windows
+   Credential Manager, for example with
+   `cmdkey /generic:ClaudeCodeUsageMonitor/cliproxyapi /user:management /pass`,
+   which prompts for the key. Alternatively, put the key alone in a file that
+   only your user can read.
+2. Open **Settings > CLIProxyAPI hub**. Enter the server URL, such as
+   `https://hub.example.ts.net:8318`, and the credential target or key file.
+3. Click **Add hub accounts**. Each enabled Claude, Codex and xAI account on the
+   server becomes a monitored account under its provider, named by its email.
+4. Under each provider's **Accounts**, choose the default account, and clear
+   **Monitor** on the local login if it no longer reflects your usage.
+
+The plain `claude.*`, `codex.*` and `grok.*` bindings follow the default account.
+A custom theme can show the others with `accounts.<provider>.<id>.*`, and the
+tooltip lists every monitored account by name. Settings store only where the key
+lives, never the key. Anyone holding the key can use the pooled accounts, so
+protect it like the logins themselves.
 
 ## Show used or remaining allowance
 
