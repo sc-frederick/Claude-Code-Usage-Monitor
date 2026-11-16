@@ -4071,6 +4071,40 @@ mod tray_usage_summary_tests {
     }
 
     #[test]
+    fn summaries_name_each_account_when_a_provider_has_several() {
+        let mut data = AppUsageData::default();
+        for (name, weekly, selected) in
+            [("b@example.com", 1.0, false), ("a@example.com", 77.0, true)]
+        {
+            data.accounts.push(crate::models::AccountUsage {
+                provider: ProviderId::Claude,
+                profile: crate::accounts::AccountProfile {
+                    name: name.into(),
+                    enabled: true,
+                    ..Default::default()
+                },
+                source_signature: String::new(),
+                source_path: None,
+                usage: Some(usage(3.0, weekly, None)),
+                error: None,
+                selected,
+            });
+        }
+        assert_eq!(
+            tray_usage_summary_lines(
+                &data,
+                ProviderSet::from_enabled([ProviderId::Claude]),
+                LanguageId::English,
+                false,
+            ),
+            [
+                "Claude Code (a@example.com) 5h: 3% | 7d: 77%",
+                "Claude Code (b@example.com) 5h: 3% | 7d: 1%",
+            ]
+        );
+    }
+
+    #[test]
     fn tray_summary_formats_enabled_provider_usage() {
         let data = [(ProviderId::Claude, usage(4.6, 42.4, None))]
             .into_iter()
