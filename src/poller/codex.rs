@@ -10,7 +10,7 @@ use crate::app_settings;
 use crate::diagnose;
 use crate::models::{CodexCreditsState, CreditsSection, UsageData, UsageSection};
 
-const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub(super) const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Deserialize)]
@@ -154,6 +154,22 @@ fn fetch_codex_usage_at(
     };
 
     codex_usage_from_response_at(response, account_id, path).ok_or(PollError::RequestFailed)
+}
+
+/// Parse a usage body fetched by someone else, such as a hub. `state_key`
+/// identifies the account for the persisted credit baseline.
+pub(super) fn usage_from_json(
+    body: &str,
+    account_id: Option<&str>,
+    state_key: &Path,
+) -> Result<UsageData, PollError> {
+    let response: CodexUsageResponse = serde_json::from_str(body).map_err(|error| {
+        diagnose::log_error("unable to parse Codex usage response", error);
+        PollError::UnexpectedResponse
+    })?;
+    let account_id = account_id.filter(|value| !value.is_empty());
+    codex_usage_from_response_at(response, account_id, Some(state_key))
+        .ok_or(PollError::UnexpectedResponse)
 }
 
 #[cfg(test)]

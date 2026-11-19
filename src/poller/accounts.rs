@@ -8,12 +8,17 @@ struct Target {
     provider: ProviderId,
     profile: Option<AccountProfile>,
     path: Result<Option<PathBuf>, String>,
+    /// Hub and auth file for a profile that reads usage through CLIProxyAPI.
+    hub: Option<(crate::accounts::CliProxySettings, String)>,
 }
 
 impl Target {
     fn signature(&self) -> String {
         if self.profile.is_none() {
             return String::new();
+        }
+        if let Some((hub, auth)) = &self.hub {
+            return cliproxy::source_signature(hub, auth);
         }
         match &self.path {
             Ok(Some(path)) => account_source_signature(self.provider, path),
@@ -91,6 +96,15 @@ where
     for provider in enabled.iter() {
         if let Some(accounts) = settings.get(provider) {
             for profile in accounts.profiles.iter().filter(|profile| profile.enabled) {
+                if profile.uses_cliproxy() {
+                    targets.push(Target {
+                        provider,
+                        profile: Some(profile.clone()),
+                        path: Ok(None),
+                        hub: Some((settings.cliproxy.clone(), profile.cliproxy_auth.clone())),
+                    });
+                    continue;
+                }
                 let path = profile.credential_path(provider).map(|path| {
                     path.or_else(|| match provider {
                         ProviderId::Codex => codex::codex_auth_path(),
@@ -104,6 +118,7 @@ where
                     provider,
                     profile: Some(profile.clone()),
                     path,
+                    hub: None,
                 });
             }
         } else {
@@ -111,6 +126,7 @@ where
                 provider,
                 profile: None,
                 path: Ok(None),
+                hub: None,
             });
         }
     }
@@ -119,8 +135,7 @@ where
     let mut groups: Vec<Vec<Target>> = Vec::new();
     for target in targets {
         if let Some(group) = groups.iter_mut().find(|group| {
-            group[0].provider == target.provider
-                && source_key(&group[0].path) == source_key(&target.path)
+            group[0].provider == target.provider && source_key(&group[0]) == source_key(&target)
         }) {
             group.push(target);
         } else {
@@ -167,9 +182,14 @@ where
                     )
                 });
                 for _ in 0..if paused_error.is_some() { 0 } else { 2 } {
-                    result = retry_after::with_manual_refresh(force, || match &target.path {
-                        Err(_) => Err(PollError::NoCredentials),
-                        Ok(path) => poll(target.provider, path.as_deref()),
+                    result = retry_after::with_manual_refresh(force, || {
+                        match (&target.hub, &target.path) {
+                            (Some((hub, auth)), _) => {
+                                cliproxy::poll_account(hub, target.provider, auth)
+                            }
+                            (None, Err(_)) => Err(PollError::NoCredentials),
+                            (None, Ok(path)) => poll(target.provider, path.as_deref()),
+                        }
                     });
                     let current_signature = target.signature();
                     if signature == current_signature {
@@ -266,8 +286,11 @@ fn append_account_result(
     }
 }
 
-fn source_key(path: &Result<Option<PathBuf>, String>) -> String {
-    match path {
+fn source_key(target: &Target) -> String {
+    if let Some((hub, auth)) = &target.hub {
+        return cliproxy::source_signature(hub, auth);
+    }
+    match &target.path {
         Ok(Some(path)) => crate::accounts::source_key(path),
         other => format!("{other:?}"),
     }

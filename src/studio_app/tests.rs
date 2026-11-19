@@ -489,6 +489,7 @@ fn app_with_surfaces(surfaces: Vec<SceneObject>) -> StudioApp {
         asset_page_selected: None,
         asset_error: None,
         settings_error: None,
+        cliproxy_status: None,
         theme_error: None,
         pending_unsaved_action: None,
         asset_delete_confirmation: None,

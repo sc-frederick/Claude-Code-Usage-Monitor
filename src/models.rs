@@ -254,7 +254,7 @@ impl AppUsageData {
                 .and_then(|configured| configured.selected())
                 .is_some_and(|selected| *selected == account.profile);
         }
-        for provider in [ProviderId::Claude, ProviderId::Codex] {
+        for provider in [ProviderId::Claude, ProviderId::Codex, ProviderId::Grok] {
             let configured = settings.get(provider).unwrap();
             let tracked = self
                 .accounts
@@ -297,6 +297,10 @@ impl AppUsageData {
     /// config directory. This only stats files; it never starts a CLI or WSL.
     pub fn invalidate_changed_credentials(&mut self) {
         for account in &mut self.accounts {
+            // Hub accounts have no local file; their signature covers the hub.
+            if account.profile.uses_cliproxy() {
+                continue;
+            }
             let expected = account
                 .profile
                 .credential_path(account.provider)

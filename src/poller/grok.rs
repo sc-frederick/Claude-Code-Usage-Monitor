@@ -13,10 +13,11 @@ use crate::models::{limit_slug, CreditsSection, UsageData, UsageLimit, UsageSect
 
 /// Grok Build reads its own `/usage` panel from the CLI chat proxy. The
 /// monitor asks the same endpoint with the session the CLI already stored.
-const GROK_BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+pub(super) const GROK_BILLING_URL: &str =
+    "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 /// Static marker the proxy uses to route CLI user-token requests.
-const GROK_TOKEN_AUTH: &str = "xai-grok-cli";
-const GROK_CLIENT_MODE: &str = "cli";
+pub(super) const GROK_TOKEN_AUTH: &str = "xai-grok-cli";
+pub(super) const GROK_CLIENT_MODE: &str = "cli";
 /// Used only when the installed CLI cannot be asked for its own version.
 const DEFAULT_GROK_CLIENT_VERSION: &str = "1.0.0";
 const GROK_HOME_ENV: &str = "GROK_HOME";
@@ -271,6 +272,18 @@ fn fetch_grok_usage(session: &GrokSession) -> Result<UsageData, PollError> {
     })
 }
 
+/// Parse a billing body fetched by someone else, such as a hub.
+pub(super) fn usage_from_json(body: &str) -> Result<UsageData, PollError> {
+    let response: GrokBillingResponse = serde_json::from_str(body).map_err(|error| {
+        diagnose::log_error("unable to parse Grok billing response", error);
+        PollError::UnexpectedResponse
+    })?;
+    grok_usage_from_billing(response).ok_or_else(|| {
+        diagnose::log("Grok billing response missing credit usage");
+        PollError::UnexpectedResponse
+    })
+}
+
 fn grok_usage_from_billing(response: GrokBillingResponse) -> Option<UsageData> {
     let config = response.config?;
     let period = config.current_period.as_ref();
@@ -379,7 +392,7 @@ fn period_end(value: Option<&serde_json::Value>) -> Option<SystemTime> {
 }
 
 /// Cache a detected CLI version, but retry after transient detection failures.
-fn grok_client_version() -> String {
+pub(super) fn grok_client_version() -> String {
     static VERSION: OnceLock<String> = OnceLock::new();
     cached_cli_detection(&VERSION, || {
         non_empty_environment(GROK_CLIENT_VERSION_ENV).or_else(cli_grok_version)

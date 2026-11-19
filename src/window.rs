@@ -1194,45 +1194,69 @@ fn usage_summary_lines(
                 }
             }
         } else {
-            let Some(usage) = data.get(provider) else {
-                continue;
-            };
             let descriptor = provider.descriptor();
-            let weekly_label = usage
-                .weekly_label
-                .as_deref()
-                .unwrap_or(strings.weekly_window);
-            let session_label = usage
-                .session_label
-                .as_deref()
-                .unwrap_or(strings.session_window);
-            let label = match data.selected_account_name(provider) {
-                Some(name) => format!("{} ({name})", language.text(descriptor.display_name)),
-                None => language.text(descriptor.display_name).to_string(),
+            let display_name = language.text(descriptor.display_name);
+            // With several monitored accounts, name each one; otherwise keep
+            // the single line for the provider's default account.
+            let mut accounts = data
+                .accounts
+                .iter()
+                .filter(|account| account.provider == provider && account.usage.is_some())
+                .collect::<Vec<_>>();
+            accounts.sort_by_key(|account| !account.selected);
+            let readings = if accounts.len() > 1 {
+                accounts
+                    .iter()
+                    .filter_map(|account| {
+                        Some((
+                            format!("{display_name} ({})", account.profile.name),
+                            account.usage.as_ref()?,
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                let Some(usage) = data.get(provider) else {
+                    continue;
+                };
+                let label = match data.selected_account_name(provider) {
+                    Some(name) => format!("{display_name} ({name})"),
+                    None => display_name.to_string(),
+                };
+                vec![(label, usage)]
             };
-            if provider == ProviderId::Claude && !usage.session.available {
+            for (label, usage) in readings {
+                let weekly_label = usage
+                    .weekly_label
+                    .as_deref()
+                    .unwrap_or(strings.weekly_window);
+                let session_label = usage
+                    .session_label
+                    .as_deref()
+                    .unwrap_or(strings.session_window);
+                if provider == ProviderId::Claude && !usage.session.available {
+                    lines.push(format!(
+                        "{label} {weekly_label}: {}",
+                        window_text(&usage.weekly)
+                    ));
+                    continue;
+                }
                 lines.push(format!(
-                    "{label} {weekly_label}: {}",
-                    window_text(&usage.weekly)
+                    "{} {}: {} | {}: {}",
+                    label,
+                    session_label,
+                    if detailed_at.is_some() {
+                        window_text(&usage.session)
+                    } else {
+                        format!("{:.0}%", shown(usage.session.percentage))
+                    },
+                    weekly_label,
+                    if detailed_at.is_some() {
+                        window_text(&usage.weekly)
+                    } else {
+                        format!("{:.0}%", shown(usage.weekly.percentage))
+                    },
                 ));
-                continue;
             }
-            lines.push(format!(
-                "{} {}: {} | {}: {}",
-                label,
-                session_label,
-                if detailed_at.is_some() {
-                    window_text(&usage.session)
-                } else {
-                    format!("{:.0}%", shown(usage.session.percentage))
-                },
-                weekly_label,
-                if detailed_at.is_some() {
-                    window_text(&usage.weekly)
-                } else {
-                    format!("{:.0}%", shown(usage.weekly.percentage))
-                },
-            ));
         }
     }
     lines
@@ -4044,6 +4068,40 @@ mod tray_usage_summary_tests {
                 [format!("Claude Code 7d: {expected}.0%")]
             );
         }
+    }
+
+    #[test]
+    fn summaries_name_each_account_when_a_provider_has_several() {
+        let mut data = AppUsageData::default();
+        for (name, weekly, selected) in
+            [("b@example.com", 1.0, false), ("a@example.com", 77.0, true)]
+        {
+            data.accounts.push(crate::models::AccountUsage {
+                provider: ProviderId::Claude,
+                profile: crate::accounts::AccountProfile {
+                    name: name.into(),
+                    enabled: true,
+                    ..Default::default()
+                },
+                source_signature: String::new(),
+                source_path: None,
+                usage: Some(usage(3.0, weekly, None)),
+                error: None,
+                selected,
+            });
+        }
+        assert_eq!(
+            tray_usage_summary_lines(
+                &data,
+                ProviderSet::from_enabled([ProviderId::Claude]),
+                LanguageId::English,
+                false,
+            ),
+            [
+                "Claude Code (a@example.com) 5h: 3% | 7d: 77%",
+                "Claude Code (b@example.com) 5h: 3% | 7d: 1%",
+            ]
+        );
     }
 
     #[test]

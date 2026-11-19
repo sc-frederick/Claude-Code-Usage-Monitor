@@ -282,6 +282,7 @@ mod accounts;
 mod antigravity;
 mod claude;
 mod claude_desktop;
+pub mod cliproxy;
 mod codex;
 mod copilot;
 mod cursor;
