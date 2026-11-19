@@ -282,21 +282,12 @@ fn add_hub_accounts(
 ) -> Result<String, String> {
     let hub_accounts = crate::poller::cliproxy::list_accounts(&accounts.cliproxy)
         .map_err(|error| error.message(language))?;
-    let mut added = 0;
-    let mut found = 0;
-    for account in hub_accounts.iter().filter(|account| !account.disabled) {
-        let Some(provider) = account.provider else {
-            continue;
-        };
-        let Some(profiles) = accounts.get_mut(provider) else {
-            continue;
-        };
-        found += 1;
-        added += profiles.add_cliproxy(&account.auth, &account.label) as usize;
-    }
+    let sync = crate::poller::cliproxy::add_missing_profiles(accounts, &hub_accounts);
     Ok(format!(
-        "{found} {}, {added} {}",
+        "{} {}, {} {}",
+        sync.supported,
         language.text("supported accounts"),
+        sync.added,
         language.text("added")
     ))
 }

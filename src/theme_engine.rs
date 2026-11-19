@@ -1580,6 +1580,9 @@ impl DataContext {
                 );
                 context.insert_string(&format!("{key}.name"), &account.profile.name);
                 context.insert(&format!("{key}.selected"), account.selected as u8 as f64);
+                // Absent accounts default to 0, so a theme can lay out a slot
+                // that appears once the account is added.
+                context.insert(&format!("{key}.monitored"), 1.0);
                 context.insert(
                     &format!("{key}.has_error"),
                     account.error.is_some() as u8 as f64,
@@ -1931,7 +1934,7 @@ impl DataContext {
     fn account_default_key(name: &str) -> Option<String> {
         let (provider, rest) = name.strip_prefix("accounts.")?.split_once('.')?;
         let (id, field) = rest.split_once('.')?;
-        (matches!(provider, "claude" | "codex")
+        (matches!(provider, "claude" | "codex" | "grok")
             && !id.is_empty()
             && id
                 .bytes()
@@ -1946,6 +1949,7 @@ impl DataContext {
             context.insert_provider("account", None, false, false);
             context.insert_string("account.name", "");
             context.insert("account.selected", 0.0);
+            context.insert("account.monitored", 0.0);
             context.insert("account.has_error", 0.0);
             context
         })

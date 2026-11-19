@@ -3023,6 +3023,44 @@ fn partial_poll_retry_delay_ms(
     })
 }
 
+/// Add profiles for accounts signed in to the CLIProxyAPI hub since the last
+/// poll and save them, so Settings, the tooltip, and themes see them too.
+/// Returns the accounts this poll should use.
+fn sync_hub_profiles(
+    accounts: crate::accounts::AccountSettings,
+) -> crate::accounts::AccountSettings {
+    let mut synced = accounts.clone();
+    match poller::cliproxy::sync_profiles(&mut synced) {
+        Ok(sync) if sync.added > 0 => {}
+        Ok(_) => return accounts,
+        Err(error) => {
+            diagnose::log(format!("CLIProxyAPI account sync skipped: {error:?}"));
+            return accounts;
+        }
+    }
+    // Apply the same additions to the file, keeping any other edits in it.
+    let mut persisted = load_settings();
+    if persisted.accounts.cliproxy != accounts.cliproxy {
+        return accounts;
+    }
+    match poller::cliproxy::sync_profiles(&mut persisted.accounts) {
+        Ok(sync) if sync.added > 0 => {
+            diagnose::log(format!("added {} CLIProxyAPI account profiles", sync.added));
+            save_settings_or_log(&persisted, "unable to save CLIProxyAPI account profiles");
+        }
+        Ok(_) => {}
+        Err(_) => return accounts,
+    }
+    let mut state = lock_state();
+    match state.as_mut() {
+        Some(state) if state.accounts == accounts => {
+            state.accounts = persisted.accounts.clone();
+            persisted.accounts
+        }
+        _ => accounts,
+    }
+}
+
 fn do_poll_once(hwnd: HWND) {
     let poll_started = Instant::now();
     let (enabled_providers, accounts, previous, force) = {
@@ -3039,6 +3077,7 @@ fn do_poll_once(hwnd: HWND) {
             })
             .unwrap_or_default()
     };
+    let accounts = sync_hub_profiles(accounts);
 
     diagnose::log_lazy(|| format!("poll started providers={enabled_providers:?} force={force}"));
     let result = poller::poll(

@@ -114,11 +114,19 @@ stored on the server.
 4. Under each provider's **Accounts**, choose the default account, and clear
    **Monitor** on the local login if it no longer reflects your usage.
 
+After that, each poll checks the server for accounts signed in since, and adds a
+monitored account for each new one. To stop watching a hub account, clear its
+**Monitor** box; a removed account comes back at the next poll.
+
 The plain `claude.*`, `codex.*` and `grok.*` bindings follow the default account.
 A custom theme can show the others with `accounts.<provider>.<id>.*`, and the
-tooltip lists every monitored account by name. Settings store only where the key
-lives, never the key. Anyone holding the key can use the pooled accounts, so
-protect it like the logins themselves.
+tooltip lists every monitored account by name.
+`accounts.<provider>.<id>.monitored` is 1 while that account is monitored and 0
+otherwise, so a theme can keep a slot for an account that has not been added yet
+and render it only once it exists.
+
+Settings store only where the key lives, never the key. Anyone holding the key
+can use the pooled accounts, so protect it like the logins themselves.
 
 ## Show used or remaining allowance
 

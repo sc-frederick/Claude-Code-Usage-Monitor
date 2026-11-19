@@ -178,6 +178,19 @@ fn named_account_bindings_show_independent_usage_and_errors() {
         evaluate("accounts.codex.work.selected", &context).unwrap(),
         1.0
     );
+    assert_eq!(
+        evaluate("accounts.codex.work.monitored", &context).unwrap(),
+        1.0
+    );
+    // A slot for an account not added yet validates and stays hidden.
+    assert_eq!(
+        evaluate("accounts.codex.account_9.monitored", &context).unwrap(),
+        0.0
+    );
+    assert_eq!(
+        evaluate("accounts.grok.account_9.weekly.available", &context).unwrap(),
+        0.0
+    );
     assert!(
         !data.is_empty(),
         "a healthy unselected account still has usable data"
