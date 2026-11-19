@@ -193,6 +193,48 @@ pub fn list_accounts(settings: &CliProxySettings) -> Result<Vec<HubAccount>, Pol
         .map(accounts_from_response)
 }
 
+/// Result of matching profiles against the hub's account list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HubSync {
+    /// Enabled hub accounts of a provider that supports profiles.
+    pub supported: usize,
+    /// Profiles created for accounts no profile tracked yet.
+    pub added: usize,
+}
+
+/// Add a monitored profile for every enabled, supported hub account that no
+/// profile tracks. A profile the user disabled still counts as tracking.
+pub fn add_missing_profiles(
+    settings: &mut crate::accounts::AccountSettings,
+    hub_accounts: &[HubAccount],
+) -> HubSync {
+    let mut sync = HubSync::default();
+    for account in hub_accounts.iter().filter(|account| !account.disabled) {
+        let Some(profiles) = account
+            .provider
+            .and_then(|provider| settings.get_mut(provider))
+        else {
+            continue;
+        };
+        sync.supported += 1;
+        sync.added += profiles.add_cliproxy(&account.auth, &account.label) as usize;
+    }
+    sync
+}
+
+/// Profiles for hub accounts signed in since the last check, so a new hub
+/// account is monitored without visiting Settings. Uses the poll cycle's
+/// cached account list.
+pub fn sync_profiles(
+    settings: &mut crate::accounts::AccountSettings,
+) -> Result<HubSync, PollError> {
+    if !settings.cliproxy.is_configured() {
+        return Ok(HubSync::default());
+    }
+    let hub_accounts = cached_accounts(&settings.cliproxy)?;
+    Ok(add_missing_profiles(settings, &hub_accounts))
+}
+
 type AccountCache = Option<(CliProxySettings, Instant, Vec<HubAccount>)>;
 
 fn cached_accounts(settings: &CliProxySettings) -> Result<Vec<HubAccount>, PollError> {
@@ -364,6 +406,70 @@ mod tests {
         assert_eq!(accounts[2].label, "xai-c.json");
         assert!(accounts[2].disabled);
         assert_eq!(accounts[3].provider, None);
+    }
+
+    fn hub_account(auth: &str, provider: Option<ProviderId>, disabled: bool) -> HubAccount {
+        HubAccount {
+            auth: auth.into(),
+            auth_index: auth.into(),
+            provider,
+            label: format!("{auth} label"),
+            disabled,
+            chatgpt_account_id: None,
+        }
+    }
+
+    #[test]
+    fn new_hub_accounts_get_profiles_once() {
+        let mut settings = crate::accounts::AccountSettings::default();
+        settings.normalize();
+        let mut hub = vec![
+            hub_account("claude-a.json", Some(ProviderId::Claude), false),
+            hub_account("claude-b.json", Some(ProviderId::Claude), false),
+            hub_account("codex-c.json", Some(ProviderId::Codex), false),
+            hub_account("claude-off.json", Some(ProviderId::Claude), true),
+            hub_account("gemini-d.json", None, false),
+        ];
+        let first = add_missing_profiles(&mut settings, &hub);
+        assert_eq!(
+            first,
+            HubSync {
+                supported: 3,
+                added: 3
+            }
+        );
+
+        // A user-disabled profile still tracks its account.
+        settings.claude.profiles[1].enabled = false;
+        hub.push(hub_account(
+            "claude-e.json",
+            Some(ProviderId::Claude),
+            false,
+        ));
+        let second = add_missing_profiles(&mut settings, &hub);
+        assert_eq!(
+            second,
+            HubSync {
+                supported: 4,
+                added: 1
+            }
+        );
+        let claude: Vec<_> = settings
+            .claude
+            .profiles
+            .iter()
+            .filter(|profile| profile.uses_cliproxy())
+            .map(|profile| (profile.cliproxy_auth.as_str(), profile.name.as_str()))
+            .collect();
+        assert_eq!(
+            claude,
+            [
+                ("claude-a.json", "claude-a.json label"),
+                ("claude-b.json", "claude-b.json label"),
+                ("claude-e.json", "claude-e.json label"),
+            ]
+        );
+        assert_eq!(add_missing_profiles(&mut settings, &hub).added, 0);
     }
 
     #[test]
